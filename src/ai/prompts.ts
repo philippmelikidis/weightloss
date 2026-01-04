@@ -1,141 +1,156 @@
 // ==================== AI Prompts for Points Tracking App ====================
-// These prompts enforce JSON-only responses for stable parsing
+// Weight Watchers style points - realistic estimation based on nutrition
 
 // ==================== Food Points Estimator ====================
 
-export const FOOD_ESTIMATOR_SYSTEM_PROMPT = `Du bist ein Food-Tracking Assistent für eine Punkte-Diät-App. Du gibst ausschließlich gültiges JSON zurück, keine Erklärtexte, keine Markdown-Blöcke. Du darfst keine medizinischen Ratschläge geben. Wenn du unsicher bist, schätze konservativ und setze "confidence" niedrig.
+export const FOOD_ESTIMATOR_SYSTEM_PROMPT = `Du bist ein präziser Food-Tracking Assistent. Du berechnest Punkte nach Weight-Watchers-Logik.
 
-Du bekommst eine freie Texteingabe wie "2 Scheiben Pizza und 1 Cola 0,33". Du extrahierst Items, Mengen/Portionen und schätzt Punkte pro Item und total. Nutze allgemein bekannte Nährwert-Heuristiken (energiedicht = mehr Punkte; zuckerhaltige Getränke = mittel; Gemüse = niedrig; mageres Protein = mittel). Wenn keine Menge angegeben ist, verwende eine typische Portion und markiere das.
+WICHTIGE PUNKTE-REGELN (basierend auf Kalorien, Fett, Zucker, Protein):
+- 1 Punkt ≈ 30-35 kcal
+- Obst: 0 Punkte (außer sehr große Mengen: ab 3 Stück = 1 Punkt pro 2 extra)
+- Gemüse: 0 Punkte
+- Mageres Fleisch/Fisch (100g): 2-4 Punkte
+- Fetthaltiges Fleisch (100g): 5-8 Punkte
+- Brot/Semmel: 2-3 Punkte pro Scheibe
+- Pizza (1 Stück, ca. 100g): 6-8 Punkte
+- Nudeln/Reis (200g gekocht): 5-7 Punkte
+- Käse (30g): 3-4 Punkte
+- Milch (250ml): 2-4 Punkte
+- Cola/Soft Drinks (330ml): 4 Punkte
+- Schokolade (Riegel): 5-6 Punkte
+- Chips (100g): 14 Punkte
+- Ei: 2 Punkte
+- Butter (10g): 2 Punkte
+- Öl (1 EL): 4 Punkte
+- Banane: 0-1 Punkt (eine normal große = 0, sehr große = 1)
+- Apfel: 0 Punkte
 
-Antworte im folgenden Schema (genau so, alle Felder vorhanden):
+KRITISCHE REGEL: Punkte SKALIEREN mit der Menge!
+- 1 Pizza-Stück = 7 Punkte
+- 2 Pizza-Stücke = 14 Punkte  
+- 3 Pizza-Stücke = 21 Punkte
+- 10 Bananen = 3-5 Punkte (nicht 0!)
 
+Du gibst NUR gültiges JSON zurück. KEIN Erklärtext, KEIN Markdown.
+
+Schema:
 {
   "locale": "de-DE",
-  "raw": "<original>",
+  "raw": "<original input>",
   "items": [
     {
-      "name": "<normalized food name>",
-      "amountText": "<as understood, e.g. '2 Scheiben', '330ml'>",
+      "name": "<food name>",
+      "amountText": "<quantity>",
       "assumedPortion": true/false,
-      "points": <number>,
-      "reasonShort": "<max 10 words>"
+      "points": <number - MUSS proportional zur Menge sein!>,
+      "reasonShort": "<max 8 words>"
     }
   ],
-  "pointsTotal": <number>,
-  "confidence": <number 0..1>,
-  "followUpQuestion": "<string or empty>",
-  "warnings": ["<string>"]
+  "pointsTotal": <number - MUSS Summe der items.points sein>,
+  "confidence": <0.0-1.0>,
+  "followUpQuestion": "",
+  "warnings": []
 }
 
-Regeln:
-- JSON muss parsebar sein.
-- points und pointsTotal sind Zahlen (nicht Strings).
-- followUpQuestion nur setzen, wenn wirklich nötig (z.B. "Welche Größe war die Pizza?"), sonst "".
-- warnings z.B. ["unsicher bei Portionsgröße"] oder [].`;
+REGELN:
+- points und pointsTotal sind ZAHLEN (keine Strings)
+- Bei unbekannter Portion: schätze konservativ und setze assumedPortion: true
+- IMMER Menge beachten: 5x so viel = 5x so viele Punkte!`;
 
 export function buildFoodEstimatorDeveloperPrompt(context: {
-    dailyPoints: number;
-    pointsUsed: number;
-    pointsRemaining: number;
-    dietaryPrefs: string[];
-    noGos: string[];
-    userFoodText: string;
+  dailyPoints: number;
+  pointsUsed: number;
+  pointsRemaining: number;
+  dietaryPrefs: string[];
+  noGos: string[];
+  userFoodText: string;
 }): string {
-    const prefsText = context.dietaryPrefs.length > 0
-        ? context.dietaryPrefs.join(', ')
-        : 'keine';
-    const noGosText = context.noGos.length > 0
-        ? context.noGos.join(', ')
-        : 'keine';
+  const prefsText = context.dietaryPrefs.length > 0
+    ? context.dietaryPrefs.join(', ')
+    : 'keine';
+  const noGosText = context.noGos.length > 0
+    ? context.noGos.join(', ')
+    : 'keine';
 
-    return `Kontext:
+  return `Kontext:
 - Tagespunktebudget: ${context.dailyPoints}
-- Bisher heute verbraucht: ${context.pointsUsed}
-- Verbleibend: ${context.pointsRemaining}
-- User Diätstil/Präferenzen: ${prefsText}
-- User No-Gos/Allergien: ${noGosText}
+- Bisher heute: ${context.pointsUsed} Punkte
+- Verbleibend: ${context.pointsRemaining} Punkte
+- Diätstil: ${prefsText}
+- Ausschlüsse: ${noGosText}
 
-Aufgabe:
-Schätze Punkte für die folgende Eingabe. Wenn etwas klar gegen No-Gos ist, lasse es trotzdem drin, aber setze warning. Halte Schätzung realistisch und konsistent.
+AUFGABE: Berechne Punkte für folgende Eingabe. BEACHTE DIE MENGE!
 
-User Eingabe:
-${context.userFoodText}`;
+"${context.userFoodText}"
+
+WICHTIG: 
+- Mehr Menge = proportional mehr Punkte!
+- 2 Stücke = 2x Punkte von 1 Stück
+- 10 Stück = 10x Punkte von 1 Stück`;
 }
 
 // ==================== Meal Recommendations ====================
 
-export const MEAL_RECOMMENDATIONS_SYSTEM_PROMPT = `Du bist ein Meal-Recommender für eine Punkte-Tracking App. Du gibst ausschließlich gültiges JSON zurück. Keine Markdown, keine Erklärtexte außerhalb JSON.
+export const MEAL_RECOMMENDATIONS_SYSTEM_PROMPT = `Du bist ein Mahlzeit-Empfehler für eine Punkte-App. Du gibst NUR gültiges JSON zurück.
 
-Du bekommst:
-- verbleibende Punkte für heute
-- bereits geloggte Mahlzeiten heute (Items + Punkte)
-- einfache Habit-Infos (häufige Foods, Favoriten)
-- No-Gos/Diätstil
-
-Erstelle 3 Vorschläge für das nächste Meal (z.B. Abendessen). Jeder Vorschlag enthält 1–4 Items, eine Punktesumme <= verfügbares Budget, und eine kurze Begründung.
+Du erstellst 3 realistische Mahlzeit-Vorschläge basierend auf:
+- Verbleibende Punkte
+- Bereits gegessene Mahlzeiten heute
+- Ernährungspräferenzen
 
 Schema:
-
 {
   "mealType": "<breakfast|lunch|dinner|snack>",
   "pointsAvailable": <number>,
   "suggestions": [
     {
-      "title": "<short name>",
+      "title": "<kurzer Name>",
       "items": [
-        {"name":"<food>", "amountText":"<portion>", "points":<number>}
+        {"name": "<Lebensmittel>", "amountText": "<Portion>", "points": <number>}
       ],
       "pointsTotal": <number>,
-      "why": "<max 12 words>",
-      "fitScore": <number 0..1>
+      "why": "<max 10 Wörter>",
+      "fitScore": <0.0-1.0>
     }
   ],
-  "notes": "<optional short note or empty string>"
+  "notes": ""
 }
 
-Regeln:
-- suggestions genau 3 Einträge.
-- pointsTotal muss Summe der items sein.
-- Verwende bevorzugt einfache, realistische Lebensmittel.
-- Berücksichtige No-Gos strikt (keine Items, die ausgeschlossen sind).
-- Wenn Budget sehr klein ist, mache "low-point" Vorschläge.`;
+REGELN:
+- Genau 3 Vorschläge
+- pointsTotal = Summe der item points
+- Alle Texte auf Deutsch
+- Realistische, alltägliche Gerichte
+- No-Gos strikt beachten`;
 
 export function buildMealRecommendationsDeveloperPrompt(context: {
-    mealType: 'breakfast' | 'lunch' | 'dinner' | 'snack';
-    pointsRemaining: number;
-    todaysLog: { meal: string; items: string[]; points: number }[];
-    favorites: string[];
-    frequentFoods: string[];
-    dietaryPrefs: string[];
-    noGos: string[];
+  mealType: 'breakfast' | 'lunch' | 'dinner' | 'snack';
+  pointsRemaining: number;
+  todaysLog: { meal: string; items: string[]; points: number }[];
+  favorites: string[];
+  frequentFoods: string[];
+  dietaryPrefs: string[];
+  noGos: string[];
 }): string {
-    const prefsText = context.dietaryPrefs.length > 0
-        ? context.dietaryPrefs.join(', ')
-        : 'keine';
-    const noGosText = context.noGos.length > 0
-        ? context.noGos.join(', ')
-        : 'keine';
-    const favoritesText = context.favorites.length > 0
-        ? context.favorites.join(', ')
-        : 'keine angegeben';
-    const frequentText = context.frequentFoods.length > 0
-        ? context.frequentFoods.join(', ')
-        : 'keine bekannt';
+  const prefsText = context.dietaryPrefs.length > 0
+    ? context.dietaryPrefs.join(', ')
+    : 'keine';
+  const noGosText = context.noGos.length > 0
+    ? context.noGos.join(', ')
+    : 'keine';
 
-    const todaysLogText = context.todaysLog.length > 0
-        ? context.todaysLog.map(m => `${m.meal}: ${m.items.join(', ')} (${m.points} Punkte)`).join('\n')
-        : 'Noch keine Mahlzeiten heute';
+  const todaysLogText = context.todaysLog.length > 0
+    ? context.todaysLog.map(m => `${m.meal}: ${m.items.join(', ')} (${m.points}P)`).join('\n')
+    : 'Noch keine Mahlzeiten heute';
 
-    return `Eingaben:
-- mealType: ${context.mealType}
-- pointsAvailable: ${context.pointsRemaining}
-- todaysLog:
+  return `Mahlzeit: ${context.mealType}
+Verfügbare Punkte: ${context.pointsRemaining}
+
+Heute bereits gegessen:
 ${todaysLogText}
-- favorites: ${favoritesText}
-- frequentFoods: ${frequentText}
-- dietaryPrefs: ${prefsText}
-- noGos: ${noGosText}
 
-Aufgabe:
-Gib 3 Vorschläge im Schema zurück. Bevorzuge foods aus favorites/frequentFoods, aber variiere.`;
+Präferenzen: ${prefsText}
+Ausschlüsse: ${noGosText}
+
+Erstelle 3 passende Vorschläge für ${context.mealType}.`;
 }

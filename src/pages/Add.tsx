@@ -31,8 +31,11 @@ export function Add() {
     const [estimating, setEstimating] = useState(false);
     const [aiResponse, setAiResponse] = useState<AIFoodResponse | null>(null);
     const [editableItems, setEditableItems] = useState<FoodItem[]>(editEntry?.items || []);
-    const [editableTotal, setEditableTotal] = useState<number>(editEntry?.pointsTotal || 0);
+    const [manualPoints, setManualPoints] = useState<number | null>(null);
+    const [showManualInput, setShowManualInput] = useState(false);
     const [fromCache, setFromCache] = useState(false);
+
+    const editableTotal = manualPoints ?? editableItems.reduce((sum, item) => sum + item.points, 0);
 
     useEffect(() => {
         if (!editEntry) {
@@ -60,6 +63,8 @@ export function Add() {
         setEstimating(true);
         setAiResponse(null);
         setFromCache(false);
+        setManualPoints(null);
+        setShowManualInput(false);
 
         try {
             const cached = await getCachedFoodResult(foodText, settings?.locale || 'de-DE');
@@ -67,7 +72,6 @@ export function Add() {
             if (cached) {
                 setAiResponse(cached);
                 setEditableItems(cached.items);
-                setEditableTotal(cached.pointsTotal);
                 setFromCache(true);
                 showToast('Aus Cache geladen', 'info');
             } else {
@@ -90,7 +94,6 @@ export function Add() {
                 await cacheFoodResult(foodText, response, settings?.locale || 'de-DE');
                 setAiResponse(response);
                 setEditableItems(response.items);
-                setEditableTotal(response.pointsTotal);
             }
         } catch (error) {
             console.error('Estimation error:', error);
@@ -104,29 +107,41 @@ export function Add() {
         const updatedItems = [...editableItems];
         updatedItems[index] = { ...updatedItems[index], points: newPoints };
         setEditableItems(updatedItems);
-        setEditableTotal(updatedItems.reduce((sum, item) => sum + item.points, 0));
+        setManualPoints(null); // Clear manual override when editing items
     };
 
     const handleRemoveItem = (index: number) => {
         const updatedItems = editableItems.filter((_, i) => i !== index);
         setEditableItems(updatedItems);
-        setEditableTotal(updatedItems.reduce((sum, item) => sum + item.points, 0));
+
+        // If no items left, show manual input
+        if (updatedItems.length === 0) {
+            setShowManualInput(true);
+            setManualPoints(0);
+        }
     };
 
     const handleSave = async () => {
-        if (editableItems.length === 0 && !foodText.trim()) {
+        const finalPoints = editableTotal;
+
+        if (editableItems.length === 0 && !showManualInput && !foodText.trim()) {
             showToast('Bitte erst Punkte schätzen', 'warning');
             return;
         }
+
+        // If manual input mode with no items, create a single item
+        const items = editableItems.length > 0
+            ? editableItems
+            : [{ name: foodText, amountText: '1 Portion', points: finalPoints }];
 
         const entry: LogEntry = {
             id: editEntry?.id || generateId(),
             mealType,
             rawText: foodText,
-            items: editableItems,
-            pointsTotal: editableTotal || 0,
+            items,
+            pointsTotal: finalPoints,
             createdAt: editEntry?.createdAt || new Date().toISOString(),
-            source: aiResponse ? 'ai' : 'manual',
+            source: aiResponse && editableItems.length > 0 ? 'ai' : 'manual',
             notes: notes || undefined,
         };
 
@@ -136,7 +151,7 @@ export function Add() {
                 showToast('Eintrag aktualisiert', 'success');
             } else {
                 await addEntry(entry);
-                showToast(`${editableTotal} Punkte gespeichert`, 'success');
+                showToast(`${finalPoints} Punkte gespeichert`, 'success');
             }
             navigate('/');
         } catch {
@@ -145,13 +160,12 @@ export function Add() {
     };
 
     const handleManualEntry = () => {
-        setEditableItems([{
-            name: foodText,
-            amountText: '1 Portion',
-            points: 0,
-        }]);
-        setEditableTotal(0);
+        setShowManualInput(true);
+        setManualPoints(0);
+        setEditableItems([]);
     };
+
+    const hasEstimation = aiResponse !== null || editableItems.length > 0 || showManualInput;
 
     return (
         <div className="page">
@@ -186,7 +200,7 @@ export function Add() {
                 />
             </div>
 
-            {!aiResponse && editableItems.length === 0 && (
+            {!hasEstimation && (
                 <div className="flex gap-sm mb-lg">
                     <button
                         className="btn btn-primary btn-lg flex-1"
@@ -205,11 +219,13 @@ export function Add() {
                 </div>
             )}
 
-            {(aiResponse || editableItems.length > 0) && (
+            {hasEstimation && (
                 <div className="card mb-lg">
                     <div className="card-header">
                         <span className="card-title">
-                            {fromCache ? 'Aus Cache' : 'KI-Schätzung'}
+                            {showManualInput && editableItems.length === 0
+                                ? 'Manuelle Eingabe'
+                                : fromCache ? 'Aus Cache' : 'KI-Schätzung'}
                         </span>
                         <span style={{ fontSize: 'var(--font-size-2xl)', fontWeight: 700 }}>
                             {editableTotal} P
@@ -222,32 +238,50 @@ export function Add() {
                         </div>
                     )}
 
-                    <div className="flex flex-col gap-sm">
-                        {editableItems.map((item, index) => (
-                            <div key={index} className="food-entry">
-                                <div className="food-entry-content">
-                                    <div className="food-entry-text">{item.name}</div>
-                                    <div className="food-entry-items">{item.amountText}</div>
+                    {editableItems.length > 0 && (
+                        <div className="flex flex-col gap-sm mb-md">
+                            {editableItems.map((item, index) => (
+                                <div key={index} className="food-entry">
+                                    <div className="food-entry-content">
+                                        <div className="food-entry-text">{item.name}</div>
+                                        <div className="food-entry-items">{item.amountText}</div>
+                                    </div>
+                                    <input
+                                        type="number"
+                                        className="form-input"
+                                        style={{ width: 60, textAlign: 'center', padding: 'var(--spacing-sm)' }}
+                                        value={item.points}
+                                        onChange={(e) => handleItemPointsChange(index, parseInt(e.target.value) || 0)}
+                                        min={0}
+                                    />
+                                    <button
+                                        className="btn btn-ghost btn-sm"
+                                        onClick={() => handleRemoveItem(index)}
+                                    >
+                                        ×
+                                    </button>
                                 </div>
-                                <input
-                                    type="number"
-                                    className="form-input"
-                                    style={{ width: 60, textAlign: 'center', padding: 'var(--spacing-sm)' }}
-                                    value={item.points}
-                                    onChange={(e) => handleItemPointsChange(index, parseInt(e.target.value) || 0)}
-                                    min={0}
-                                />
-                                <button
-                                    className="btn btn-ghost btn-sm"
-                                    onClick={() => handleRemoveItem(index)}
-                                >
-                                    ×
-                                </button>
-                            </div>
-                        ))}
-                    </div>
+                            ))}
+                        </div>
+                    )}
 
-                    {aiResponse && (
+                    {/* Manual points input when all items removed or manual mode */}
+                    {(showManualInput || editableItems.length === 0) && (
+                        <div className="form-group" style={{ marginBottom: 0 }}>
+                            <label className="form-label">Punkte manuell eingeben</label>
+                            <input
+                                type="number"
+                                className="form-input"
+                                style={{ fontSize: 'var(--font-size-xl)', textAlign: 'center' }}
+                                value={manualPoints ?? 0}
+                                onChange={(e) => setManualPoints(parseInt(e.target.value) || 0)}
+                                min={0}
+                                autoFocus
+                            />
+                        </div>
+                    )}
+
+                    {aiResponse && editableItems.length > 0 && (
                         <div className="mt-md text-muted" style={{ fontSize: 'var(--font-size-sm)' }}>
                             Konfidenz: {Math.round((aiResponse.confidence || 0) * 100)}%
                         </div>
@@ -273,13 +307,13 @@ export function Add() {
                 <button
                     className="btn btn-primary btn-lg flex-1"
                     onClick={handleSave}
-                    disabled={editableItems.length === 0 && !foodText.trim()}
+                    disabled={!hasEstimation && !foodText.trim()}
                 >
                     {editEntry ? 'Aktualisieren' : 'Speichern'}
                 </button>
             </div>
 
-            {(aiResponse || editableItems.length > 0) && (
+            {hasEstimation && (
                 <button
                     className="btn btn-ghost btn-full mt-md"
                     onClick={handleEstimate}
